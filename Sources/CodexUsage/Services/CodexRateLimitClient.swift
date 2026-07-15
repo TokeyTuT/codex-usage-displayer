@@ -22,6 +22,8 @@ final class CodexRateLimitClient: @unchecked Sendable {
   }
 
   var onSnapshot: (@Sendable (RateLimitSnapshot) -> Void)?
+  var onTokenUsage: (@Sendable (TokenUsageSnapshot) -> Void)?
+  var onTokenUsageError: (@Sendable (Error) -> Void)?
   var onError: (@Sendable (Error) -> Void)?
 
   private let queue = DispatchQueue(label: "com.codexusage.app-server")
@@ -30,6 +32,7 @@ final class CodexRateLimitClient: @unchecked Sendable {
   private var outputBuffer = Data()
   private var initialized = false
   private var requestID = 2
+  private var tokenUsageRequestIDs = Set<Int>()
   private var stderrTail = ""
 
   func connect() {
@@ -47,6 +50,7 @@ final class CodexRateLimitClient: @unchecked Sendable {
       }
       guard self.initialized else { return }
       self.sendRateLimitRequest()
+      self.sendTokenUsageRequest()
     }
   }
 
@@ -151,6 +155,12 @@ final class CodexRateLimitClient: @unchecked Sendable {
   private func handle(_ message: [String: Any]) {
     if let errorObject = message["error"] as? [String: Any] {
       let detail = errorObject["message"] as? String ?? "未知错误"
+      if let id = (message["id"] as? NSNumber)?.intValue,
+        tokenUsageRequestIDs.remove(id) != nil
+      {
+        onTokenUsageError?(ClientError.server(detail))
+        return
+      }
       onError?(ClientError.server(detail))
       return
     }
@@ -159,14 +169,23 @@ final class CodexRateLimitClient: @unchecked Sendable {
       initialized = true
       send(["method": "initialized", "params": [:]])
       sendRateLimitRequest()
+      sendTokenUsageRequest()
       return
     }
 
-    if let result = message["result"] as? [String: Any],
-      let snapshot = RateLimitParser.snapshot(from: result)
-    {
-      onSnapshot?(snapshot)
-      return
+    if let result = message["result"] as? [String: Any] {
+      if let id = (message["id"] as? NSNumber)?.intValue,
+        tokenUsageRequestIDs.remove(id) != nil,
+        let snapshot = TokenUsageParser.snapshot(from: result)
+      {
+        onTokenUsage?(snapshot)
+        return
+      }
+
+      if let snapshot = RateLimitParser.snapshot(from: result) {
+        onSnapshot?(snapshot)
+        return
+      }
     }
 
     if message["method"] as? String == "account/rateLimits/updated",
@@ -182,6 +201,17 @@ final class CodexRateLimitClient: @unchecked Sendable {
     send([
       "method": "account/rateLimits/read",
       "id": requestID,
+      "params": NSNull(),
+    ])
+  }
+
+  private func sendTokenUsageRequest() {
+    requestID += 1
+    let id = requestID
+    tokenUsageRequestIDs.insert(id)
+    send([
+      "method": "account/usage/read",
+      "id": id,
       "params": NSNull(),
     ])
   }
@@ -210,6 +240,7 @@ final class CodexRateLimitClient: @unchecked Sendable {
     process = nil
     input = nil
     initialized = false
+    tokenUsageRequestIDs.removeAll(keepingCapacity: true)
     outputBuffer.removeAll(keepingCapacity: true)
   }
 

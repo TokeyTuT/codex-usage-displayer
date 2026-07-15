@@ -13,6 +13,8 @@ final class UsageViewModel: ObservableObject {
   }
 
   @Published private(set) var snapshot = RateLimitSnapshot.empty
+  @Published private(set) var tokenUsage = TokenUsageSnapshot.empty
+  @Published private(set) var tokenUsageError: String?
   @Published private(set) var connectionState: ConnectionState = .connecting
   @Published private(set) var isRefreshing = false
   @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -54,6 +56,22 @@ final class UsageViewModel: ObservableObject {
         guard let self else { return }
         self.connectionState = .failed(error.localizedDescription)
         self.isRefreshing = false
+      }
+    }
+
+    client.onTokenUsage = { [weak self] snapshot in
+      Task { @MainActor in
+        guard let self else { return }
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.88)) {
+          self.tokenUsage = snapshot
+          self.tokenUsageError = nil
+        }
+      }
+    }
+
+    client.onTokenUsageError = { [weak self] error in
+      Task { @MainActor in
+        self?.tokenUsageError = error.localizedDescription
       }
     }
   }

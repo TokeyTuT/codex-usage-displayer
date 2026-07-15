@@ -10,6 +10,11 @@ struct UsagePanelView: View {
       VStack(spacing: 14) {
         header
 
+        TokenUsageCard(
+          snapshot: model.tokenUsage,
+          errorMessage: model.tokenUsageError
+        )
+
         UsageGaugeCard(
           eyebrow: "ROLLING WINDOW",
           title: "五小时用量",
